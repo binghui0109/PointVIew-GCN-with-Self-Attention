@@ -3,13 +3,25 @@ import torch
 import torch.nn as nn
 from utils import View_selector, LocalGCN, NonLocalMP
 
+class AttentionModule(nn.Module):
+    def __init__(self, in_dim, num_heads):
+        super(AttentionModule, self).__init__()
+        self.self_attn = nn.MultiheadAttention(in_dim, num_heads)
+        self.norm = nn.LayerNorm(in_dim)
+
+    def forward(self, x):
+        x_norm = self.norm(x)
+        x_attn, _ = self.self_attn(x_norm, x_norm, x_norm)
+        x = x * x_attn
+        return x
+    
 class PointViewGCN(Model):
     def __init__(self, name, nclasses=40, num_views=20):
         super(PointViewGCN, self).__init__(name)
         self.nclasses = nclasses
         self.num_views = num_views
         self.drop1 = nn.Dropout(0.5)
-
+        hidden_dim = 512
         vertices = [[1.44337567, 1.44337567, 1.44337567], [1.44337567, 1.44337567, -1.44337567], [1.44337567, -1.44337567, 1.44337567], [1.44337567, -1.44337567, -1.44337567],
                     [-1.44337567, 1.44337567, 1.44337567], [-1.44337567, 1.44337567, -1.44337567], [-1.44337567, -1.44337567, 1.44337567], [-1.44337567, -1.44337567, -1.44337567],
                     [0, 0.89205522, 2.3354309], [0, 0.89205522, -2.3354309], [0, -0.89205522, 2.3354309], [0, -0.89205522, -2.3354309],
@@ -19,12 +31,16 @@ class PointViewGCN(Model):
         self.num_views_mine = 60
         self.vertices = torch.tensor(vertices).cuda()
         self.LocalGCN1 = LocalGCN(k=4, n_views=self.num_views_mine // 3)
+        self.Attention1 = AttentionModule(hidden_dim, num_heads=4)
         self.NonLocalMP1 = NonLocalMP(n_view=self.num_views_mine // 3)
         self.LocalGCN2 = LocalGCN(k=4, n_views=self.num_views_mine // 4)
+        self.Attention2 = AttentionModule(hidden_dim, num_heads=4)
         self.NonLocalMP2 = NonLocalMP(n_view=self.num_views_mine // 4)
         self.LocalGCN3 = LocalGCN(k=4, n_views=self.num_views_mine // 6)
+        self.Attention3 = AttentionModule(hidden_dim, num_heads=4)
         self.NonLocalMP3 = NonLocalMP(n_view=self.num_views_mine // 6)
         self.LocalGCN4 = LocalGCN(k=4, n_views=self.num_views_mine // 12)
+        # self.Attention4 = AttentionModule(hidden_dim, num_heads=4)
 
         self.View_selector1 = View_selector(n_views=self.num_views, sampled_view=self.num_views_mine // 4)
         self.View_selector2 = View_selector(n_views=self.num_views_mine // 4, sampled_view=self.num_views_mine // 6)
@@ -48,10 +64,13 @@ class PointViewGCN(Model):
     def forward(self, x):
         views = self.num_views
         y = x
+        # print(y)
         y = y.view((int(x.shape[0] / views), views, -1))
+        # print(y)
         vertices = self.vertices.unsqueeze(0).repeat(y.shape[0], 1, 1)
 
         y = self.LocalGCN1(y, vertices)
+        y = self.Attention1(y)
         # sahep y [1,20,512]
         y2 = self.NonLocalMP1(y)
         pooled_view1 = torch.max(y, 1)[0]
@@ -59,18 +78,21 @@ class PointViewGCN(Model):
         z, F_score, vertices2 = self.View_selector1(y2, vertices, k=4)
         # shape z = [1,10,512]
         z = self.LocalGCN2(z, vertices2)
+        z = self.Attention2(z)
         z2 = self.NonLocalMP2(z)
         pooled_view2 = torch.max(z, 1)[0]
         # shape pooled_view2 [1,512]
 
         m, F_score_m, vertices_m = self.View_selector2(z2, vertices2, k=4)
         m = self.LocalGCN3(m, vertices_m)
+        m = self.Attention3(m)
         m2 = self.NonLocalMP3(m)
         pooled_view3 = torch.max(m, 1)[0]
         # pooled_view3 = pooled_view1 + pooled_view3
 
         w, F_score2, vertices3 = self.View_selector3(m2, vertices_m, k=4)
         w = self.LocalGCN4(w, vertices3)
+        # w = self.Attention4(w)
         pooled_view4 = torch.max(w, 1)[0]
         # pooled_view4 = pooled_view4 + pooled_view1
 
@@ -78,3 +100,4 @@ class PointViewGCN(Model):
         pooled_view = self.cls(pooled_view)
 
         return pooled_view, F_score, F_score_m, F_score2
+
