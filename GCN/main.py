@@ -10,7 +10,10 @@ from torch.utils.tensorboard import SummaryWriter
 import math
 from PintView_GCN_attention import PointViewGCN
 from dataloader import MultiviewPoint
-
+import csv
+from sklearn import metrics
+import matplotlib.pyplot as plt
+import seaborn as sns
 def seed_torch(seed=9990):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
@@ -32,6 +35,7 @@ class Trainer(object):
         global lr
         best_acc = 0
         i_acc = 0
+
         self.model.train()
         for epoch in range(n_epochs):
             if epoch == 1:
@@ -46,16 +50,20 @@ class Trainer(object):
             for i in range(len(rand_idx)):
                 filepaths_new.extend(self.train_loader.dataset.filepaths[
                                      rand_idx[i] * self.num_views:(rand_idx[i] + 1) * self.num_views])
-            self.train_loader.dataset.filepaths = filepaths_new
 
+            self.train_loader.dataset.filepaths = filepaths_new
+            # print(self.train_loader)
             lr = self.optimizer.state_dict()['param_groups'][0]['lr']
+            a = []
+            b = []
             for i, data in enumerate(self.train_loader):
+                # print(data)
                 if epoch == 0:
                     for param_group in self.optimizer.param_groups:
                         param_group['lr'] = lr * ((i + 1) / (len(rand_idx) // 20))
-
                 B, V, C = data[1].size()
                 in_data = Variable(data[1]).view(-1, C)
+                # print(in_data)
                 target = Variable(data[0]).cuda().long()
                 target_ = target.unsqueeze(1).repeat(1, 4 * (5 + 10+15)).view(-1)
                 self.optimizer.zero_grad()
@@ -99,6 +107,12 @@ class Trainer(object):
         samples_class = np.zeros(40)
         self.model.eval()
         targ_numpy, pred_numpy = [], []
+        confusion_matrix = np.zeros((40, 40))
+        class_names = ['airplane', 'bathtub', 'bed', 'bench', 'bookshelf', 'bottle', 'bowl', 'car', 'chair',
+                           'cone', 'cup', 'curtain', 'desk', 'door', 'dresser', 'flower_pot', 'glass_box',
+                           'guitar', 'keyboard', 'lamp', 'laptop', 'mantel', 'monitor', 'night_stand',
+                           'person', 'piano', 'plant', 'radio', 'range_hood', 'sink', 'sofa', 'stairs',
+                           'stool', 'table', 'tent', 'toilet', 'tv_stand', 'vase', 'wardrobe', 'xbox']
         for _, data in enumerate(self.val_loader, 0):
             B, V, C = data[1].size()
             in_data = Variable(data[1]).view(-1, C)
@@ -109,6 +123,14 @@ class Trainer(object):
             pred_numpy.append(np.asarray(pred.cpu()))
             results = pred == target
 
+
+            for i in range(len(target)):
+                if pred[i] != target[i]:
+                    wrong_class[target[i]] += 1
+                samples_class[target[i]] += 1
+
+            targ_numpy.append(target.cpu().numpy())
+            pred_numpy.append(pred.cpu().numpy())            
             for i in range(results.size()[0]):
                 if not bool(results[i].cpu().data.numpy()):
                     wrong_class[target.cpu().data.numpy().astype('int')[i]] += 1
@@ -117,6 +139,9 @@ class Trainer(object):
 
             all_correct_points += correct_points
             all_points += results.size()[0]
+
+        targ_numpy = np.concatenate(targ_numpy, axis=0)
+        pred_numpy = np.concatenate(pred_numpy, axis=0)
         print('Total # of test models: ', all_points)
         class_acc = (samples_class - wrong_class) / samples_class
         val_mean_class_acc = np.mean(class_acc)
@@ -124,9 +149,25 @@ class Trainer(object):
         val_overall_acc = acc.cpu().data.numpy()
         print('val mean class acc. : ', val_mean_class_acc)
         print('val overall acc. : ', val_overall_acc)
-        print(class_acc)
+        if epoch ==99:
+
+            sns.set(font_scale=0.9) # adjust font size
+            confusion_matrix = metrics.confusion_matrix(targ_numpy, pred_numpy)
+            print(confusion_matrix)
+            sns.heatmap(confusion_matrix, annot=True, annot_kws={"size": 12}, cmap='Blues', fmt='g', cbar=False, xticklabels=class_names, yticklabels=class_names)
+            plt.title("Confusion Matrix")
+            plt.xlabel("Predicted Class")
+            plt.ylabel("True Class")
+            plt.xticks(rotation=90)
+            plt.yticks(rotation=0)
+            ax = plt.gca()
+            ax.xaxis.set_label_position('top')
+            plt.show()
+
+
         self.model.train()
         return val_overall_acc, val_mean_class_acc
+
 
 
 parser = argparse.ArgumentParser()
@@ -147,6 +188,7 @@ if __name__ == '__main__':
     cnet_2 = PointViewGCN(args.name, nclasses=40, num_views=args.num_views)
     optimizer = optim.Adam(cnet_2.parameters(), weight_decay=args.weight_decay, lr=args.learning_rate)
     train_dataset = MultiviewPoint(args.train_path)
+    # print(train_dataset)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batchSize, shuffle=False, num_workers=args.workers)
     val_dataset = MultiviewPoint(args.val_path)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=20, shuffle=False, num_workers=args.workers)
