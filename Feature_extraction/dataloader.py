@@ -19,10 +19,20 @@ class SinglePoint(torch.utils.data.Dataset):
         set_ = root_dir.split('/')[-1]
         parent_dir = root_dir.rsplit('/', 2)[0]
         self.filepaths = []
-        for i in range(len(self.classnames)):
-            all_files = sorted(glob.glob(parent_dir + '/' + self.classnames[i] + '/' + set_ + '/*.xyz'))
+        if set_ == "train":
+            for i in range(len(self.classnames)):
+                all_file = sorted(glob.glob(parent_dir + '/' + self.classnames[i] + '/' + set_ + '/*.xyz'))
+                # all_file = all_file[:200]
+                all_files = [j.replace('\\','/') for j in all_file]
+                self.filepaths.extend(all_files)
 
-            self.filepaths.extend(all_files)
+        if set_ == "test":
+            for i in range(len(self.classnames)):
+                all_file = sorted(glob.glob(parent_dir + '/' + self.classnames[i] + '/' + set_ + '/*.xyz'))
+                # all_file = all_file[:200]
+                all_files = [j.replace('\\','/') for j in all_file]
+                self.filepaths.extend(all_files)
+                
     def __len__(self):
         # print(len(self.filepaths))
         return len(self.filepaths)
