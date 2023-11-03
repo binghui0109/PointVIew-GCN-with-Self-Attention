@@ -8,7 +8,7 @@ import argparse
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 import math
-from PintView_GCN import PointViewGCN
+from PintView_GCN_attention import PointViewGCN
 from dataloader import MultiviewPoint
 
 def seed_torch(seed=9990):
